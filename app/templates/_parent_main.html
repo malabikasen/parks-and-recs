@@ -1,0 +1,32 @@
+<div id="main">
+  {% if flash %}<div class="flash {{ 'ok' if flash[0] else 'err' }}">{{ flash[1] }}</div>{% endif %}
+
+  <article>
+    <header><strong>{{ household.name }} household</strong> · my registrations</header>
+    {% if not regs.enrolled and not regs.waiting %}<p class="muted">Nothing yet. Pick a section below.</p>{% endif %}
+    {% for r in regs.enrolled %}
+    <div class="inline">
+      <span>✅ <strong>{{ r.first_name }}</strong>: {{ r.section_name }} <span class="muted">({{ r.schedule }}{% if r.source == 'waitlist' %}, from waitlist{% endif %})</span></span>
+      <button class="outline secondary" hx-post="/registrations/{{ r.id }}/drop" hx-target="#main" hx-swap="outerHTML"
+              hx-confirm="Drop {{ r.first_name }} from {{ r.section_name }}?">Drop</button>
+    </div>
+    {% endfor %}
+    {% for w in regs.waiting %}
+    <div class="inline">
+      <span>⏳ <strong>{{ w.first_name }}</strong>: #{{ w.position }} on the waitlist for {{ w.section_name }}
+        <span class="muted">(we'll reach out if a seat opens up)</span></span>
+      <button class="outline secondary" hx-post="/waitlist/{{ w.id }}/withdraw" hx-target="#main" hx-swap="outerHTML">Leave waitlist</button>
+    </div>
+    {% endfor %}
+  </article>
+
+  {% for program in programs %}
+  <section>
+    <h3>{{ program.name }}</h3>
+    <p class="muted">{{ program.description }}</p>
+    <div class="sections">
+      {% for s in program.sections %}{% include "_section.html" %}{% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+</div>

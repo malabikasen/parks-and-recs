@@ -11,6 +11,7 @@ SCHEMA_PATH = ROOT / "schema.sql"
 TABLES = ["events", "waitlist_entries", "registrations", "sections", "programs", "participants", "households"]
 
 _init_lock = threading.Lock()
+_ready: set[str] = set()
 
 
 def default_db_path() -> str:
@@ -52,6 +53,8 @@ def is_initialized(conn: sqlite3.Connection) -> bool:
 
 def ensure_db(path: str, seed_fn) -> None:
     """Create + seed the database on first use (e.g. a Vercel cold start)."""
+    if path in _ready and os.path.exists(path):
+        return
     with _init_lock:
         conn = connect(path)
         try:
@@ -61,6 +64,7 @@ def ensure_db(path: str, seed_fn) -> None:
                     seed_fn(conn)
         finally:
             conn.close()
+        _ready.add(path)
 
 
 def reset_db(conn: sqlite3.Connection, seed_fn) -> None:

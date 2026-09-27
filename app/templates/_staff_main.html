@@ -1,0 +1,102 @@
+<div id="main">
+  {% if flash %}<div class="flash {{ 'ok' if flash[0] else 'err' }}">{{ flash[1] }}</div>{% endif %}
+
+  <h3>Waitlists: reach out in order</h3>
+  <p class="muted">
+    A seat that frees up is held for the waitlist, so the public still sees "Full". Only the first person in line can be
+    enrolled or resolved. The server rejects anything out of order, so try clicking Enroll on #2.
+  </p>
+  {% if not queues %}<p class="muted">No one is waiting.</p>{% endif %}
+  {% for q in queues %}
+  <article>
+    <header class="inline">
+      <strong>{{ q.name }}</strong>
+      <span class="muted">{{ q.enrolled }}/{{ q.capacity }} enrolled · {{ q.free }} free seat{{ '' if q.free == 1 else 's' }}</span>
+    </header>
+    <table>
+      <thead><tr><th>#</th><th>Participant</th><th>Household contact</th><th>Joined</th><th>Actions</th></tr></thead>
+      <tbody>
+      {% for e in q.entries %}
+      <tr class="{{ 'head' if loop.first }}">
+        <td>{{ e.position }}</td>
+        <td>{{ e.first_name }}{% if e.together_with %}<br><small class="muted">joined with {{ e.together_with | join(', ') }}</small>{% endif %}</td>
+        <td>{{ e.household_name }}<br><small class="muted">{{ e.email }} · {{ e.phone }}</small></td>
+        <td><small>{{ e.joined_at | when }}</small></td>
+        <td>
+          <form class="inline">
+            <button class="{{ '' if loop.first else 'outline' }}" hx-post="/staff/sections/{{ q.id }}/entries/{{ e.id }}/enroll"
+                    hx-target="#main" hx-swap="outerHTML">Enroll</button>
+            {% if loop.first %}
+            <select name="reason" aria-label="Decline reason">
+              <option value="">Decline reason…</option>
+              {% for key, label in DECLINE_REASONS.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+            </select>
+            <input name="note" placeholder="Note (optional)" style="max-width: 10rem">
+            <button class="secondary outline" hx-post="/staff/sections/{{ q.id }}/entries/{{ e.id }}/resolve"
+                    hx-vals='{"outcome": "declined"}' hx-target="#main" hx-swap="outerHTML">Declined</button>
+            <button class="secondary outline" hx-post="/staff/sections/{{ q.id }}/entries/{{ e.id }}/resolve"
+                    hx-vals='{"outcome": "unreachable"}' hx-target="#main" hx-swap="outerHTML">Unreachable</button>
+            {% endif %}
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </article>
+  {% endfor %}
+
+  <h3>Should we build automated waitlist promotion?</h3>
+  <p class="muted">
+    We pushed back on "auto-enroll and charge". These numbers are what would change our minds. Thresholds are
+    placeholders to agree with stakeholders. Even at "yes", the plan is automated <em>offers with a consent hold</em>,
+    never automatic charging.
+  </p>
+  <table>
+    <thead><tr><th>Signal</th><th>Value</th><th>Threshold</th><th>Met?</th></tr></thead>
+    <tbody>
+    {% for d in metrics.decision %}
+    <tr>
+      <td>{{ d.label }}</td>
+      <td>{{ (d.value | pct) if d.fmt == 'pct' else (d.value | hours) }}</td>
+      <td>{{ d.threshold }}</td>
+      <td>{{ '—' if d.met is none else ('✅' if d.met else '❌') }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p><strong>Verdict:</strong>
+    {% if metrics.build_automation %}Build automated offers (with a consent hold).
+    {% else %}Not yet. Keep manual outreach and keep collecting data.{% endif %}
+  </p>
+
+  <div class="grid">
+    <article>
+      <header>Why families decline an outreach offer</header>
+      <ul>{% for label, n in metrics.declines_by_reason.items() %}<li>{{ label }}: <strong>{{ n }}</strong></li>{% endfor %}</ul>
+      <small class="muted">"Booked something else" measures the double-booking risk. "Family placed together" measures the siblings problem.</small>
+    </article>
+    <article>
+      <header>Family waitlist requests</header>
+      <p>Requests with more than one person: <strong>{{ metrics.multi_person_request_share | pct }}</strong></p>
+      <small class="muted">How often a "promote siblings together" rule would even matter.</small>
+    </article>
+  </div>
+
+  <details>
+    <summary>Per-section demand</summary>
+    <table>
+      <thead><tr><th>Section</th><th>Cap</th><th>Enrolled</th><th>Waiting</th><th>Oversub.</th><th>Saw full</th><th>Joined WL</th><th>Join rate</th><th>Seats freed</th><th>Outreach ✓/✗/?</th></tr></thead>
+      <tbody>
+      {% for s in metrics.sections %}
+      <tr>
+        <td>{{ s.name }}</td><td>{{ s.capacity }}</td><td>{{ s.enrolled }}</td><td>{{ s.waiting }}</td>
+        <td>{{ s.oversubscription | pct }}</td><td>{{ s.full_seen }}</td><td>{{ s.joined }}</td><td>{{ s.join_rate | pct }}</td>
+        <td>{{ s.seats_freed }}</td><td>{{ s.outreach_enrolled }}/{{ s.declined }}/{{ s.unreachable }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <small class="muted">Oversubscription = waiting ÷ capacity. High oversubscription with few freed seats means add a section; it doesn't mean automate.</small>
+  </details>
+</div>

@@ -1,0 +1,35 @@
+<article id="section-{{ s.id }}">
+  <header class="inline">
+    <strong>{{ s.name }}</strong>
+    {% if s.state == 'opens' %}<span class="badge opens">Opens {{ s.opens_at | when }}</span>
+    {% elif s.state == 'full' %}<span class="badge full">Full</span>
+    {% else %}<span class="badge open">{{ s.seats }} seat{{ '' if s.seats == 1 else 's' }} left</span>{% endif %}
+  </header>
+  <p class="muted">
+    {{ s.schedule }} · starts {{ s.start_date }}<br>
+    {{ s.ages }} · {{ s.price_cents | money }} · {{ s.enrolled }}/{{ s.capacity }} enrolled{% if s.waiting %} · {{ s.waiting }} waiting{% endif %}
+  </p>
+
+  <form>
+    <fieldset>
+      {% for o in s.options %}
+      <label>
+        <input type="checkbox" name="participant_ids" value="{{ o.id }}" {% if o.blocked or s.state == 'opens' %}disabled{% endif %}>
+        {{ o.name }} <span class="muted">(age {{ o.age }} at start{% if o.blocked %}, {{ o.blocked }}{% endif %})</span>
+      </label>
+      {% endfor %}
+    </fieldset>
+    {% if s.state == 'open' %}
+      <button hx-post="/sections/{{ s.id }}/register" hx-target="#main" hx-swap="outerHTML" {% if not s.can_act %}disabled{% endif %}>Register</button>
+    {% elif s.state == 'full' %}
+      <button class="secondary" hx-post="/sections/{{ s.id }}/waitlist" hx-target="#main" hx-swap="outerHTML" {% if not s.can_act %}disabled{% endif %}>I'm interested</button>
+      <p class="muted">This section is full. Join the waitlist and we'll reach out if a seat opens up.</p>
+    {% else %}
+      <button disabled>Registration not open yet</button>
+    {% endif %}
+  </form>
+
+  {% for o in section_messages.get(s.id, []) %}
+  <p class="msg {{ 'ok' if o.ok else 'err' }}">{{ '✓' if o.ok else '✗' }} {{ o.message }}</p>
+  {% endfor %}
+</article>

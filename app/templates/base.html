@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Parks & Rec Registration</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
+  <style>
+    :root { --pico-font-size: 95%; }
+    .banner { background: var(--pico-mark-background-color); color: var(--pico-mark-color); padding: .5rem 1rem; font-size: .85rem; }
+    header nav form { margin: 0; }
+    header nav select, header nav button { margin: 0; padding: .35rem .75rem; width: auto; }
+    .sections { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 1rem; }
+    .sections article { margin: 0; }
+    .badge { display: inline-block; padding: .1rem .5rem; border-radius: 1rem; font-size: .75rem; font-weight: 600; }
+    .badge.open { background: #d1f2d9; color: #135c26; }
+    .badge.full { background: #fde2e1; color: #8a1c17; }
+    .badge.opens { background: #e3e8f5; color: #28406e; }
+    .muted { color: var(--pico-muted-color); font-size: .85rem; }
+    .msg { font-size: .85rem; margin: .25rem 0; }
+    .msg.ok { color: #135c26; } .msg.err { color: #8a1c17; }
+    .flash { padding: .6rem 1rem; border-radius: .4rem; margin-bottom: 1rem; }
+    .flash.ok { background: #d1f2d9; } .flash.err { background: #fde2e1; }
+    fieldset label { font-size: .9rem; }
+    table { font-size: .85rem; }
+    tr.head td { font-weight: 600; }
+    .inline { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+    .inline > * { margin: 0; width: auto; }
+  </style>
+</head>
+<body>
+  <div class="banner">
+    Demo: logins are fake (pick a household), there are no payments, and data lives in temporary storage that may reset.
+    Use <strong>Reset demo data</strong> to replay the scenarios.
+  </div>
+  <header class="container">
+    <nav>
+      <ul>
+        <li><strong>Parks &amp; Rec</strong></li>
+        <li><a href="/" {% if page == 'parent' %}aria-current="page"{% endif %}>Parent</a></li>
+        <li><a href="/staff" {% if page == 'staff' %}aria-current="page"{% endif %}>Staff</a></li>
+      </ul>
+      <ul>
+        {% if household %}
+        <li>
+          <form method="post" action="/household" class="inline">
+            <label for="hh" class="muted">Acting as</label>
+            <select id="hh" name="household_id" onchange="this.form.submit()">
+              {% for h in households %}
+              <option value="{{ h.id }}" {% if h.id == household.id %}selected{% endif %}>{{ h.name }} household</option>
+              {% endfor %}
+            </select>
+          </form>
+        </li>
+        {% endif %}
+        <li>
+          <form method="post" action="/demo/reset"><button class="secondary outline">Reset demo data</button></form>
+        </li>
+      </ul>
+    </nav>
+  </header>
+  <main class="container">
+    {% block main %}{% endblock %}
+  </main>
+</body>
+</html>
