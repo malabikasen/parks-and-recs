@@ -42,4 +42,4 @@ What it tried that **held up**:
 - Age on a birthday and on Feb 29, and the exact-second open time, behave correctly.
 - Queue positions stay correct after a withdraw.
 
-Noted as a **design trade-off** (not changed): if 2 seats free up with only 1 person waiting, both are held. A better rule is to hold only as many seats as there are people waiting. That's next on my list.
+It also flagged a **design trade-off**: if 2 seats free up with only 1 person waiting, both were held. **I decided to change the rule**, so only one seat is held per person waiting and the surplus goes straight back to the public. `seat_freed` is now only logged for seats that are actually held, which keeps the metrics honest.

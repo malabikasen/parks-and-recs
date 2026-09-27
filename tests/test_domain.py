@@ -95,6 +95,15 @@ def test_freed_seat_is_held_for_waitlist_not_public(conn):
     assert conn.execute("SELECT COUNT(*) FROM events WHERE type='seat_freed'").fetchone()[0] == 1
 
 
+def test_only_as_many_seats_held_as_people_waiting(conn):
+    domain.drop(conn, GARCIA, reg_id(conn, SWIM2_TUE, SOFIA), NOW)       # 1 free, 2 waiting → held
+    domain.staff_resolve(conn, SWIM2_TUE, head_id(conn, SWIM2_TUE), "unreachable", None, None, NOW)
+    domain.drop(conn, KIM, reg_id(conn, SWIM2_TUE, LEO), NOW)            # 2 free, 1 waiting → 1 held, 1 public
+    assert codes(domain.register(conn, PATEL, SWIM2_TUE, [AVA], NOW)) == [None]
+    assert codes(domain.register(conn, PATEL, SWIM2_TUE, [BEN], NOW)) == ["SECTION_FULL"]  # Noah's seat
+    assert domain.metrics(conn)["seats_freed"] == 1  # Leo's seat went public, so it isn't counted
+
+
 def test_staff_must_go_in_order(conn):
     domain.drop(conn, GARCIA, reg_id(conn, SWIM2_TUE, SOFIA), NOW)
     noah_entry = conn.execute("SELECT id FROM waitlist_entries WHERE participant_id=?", (NOAH,)).fetchone()[0]

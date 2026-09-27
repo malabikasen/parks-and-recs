@@ -53,8 +53,9 @@ def age_range_label(min_age: int | None, max_age: int | None) -> str:
 
 
 def public_seats(capacity: int, enrolled: int, waiting: int) -> int:
-    """Freed seats are held for the waitlist: the public only sees seats when nobody is waiting."""
-    return 0 if waiting else max(capacity - enrolled, 0)
+    """Free seats are held for the waitlist, one per person waiting; only the surplus is public.
+    (2 seats free + 1 waiting → 1 held, 1 public. Holding both would leave a seat empty for no one.)"""
+    return max(capacity - enrolled - waiting, 0)
 
 
 @dataclass
@@ -316,9 +317,11 @@ def drop(conn, household_id: int, registration_id: int, now: datetime) -> str:
             raise DomainError("NOT_ENROLLED", "That registration was already dropped.")
         conn.execute("UPDATE registrations SET status = 'dropped', dropped_at = ? WHERE id = ?", (iso(now), registration_id))
         _log(conn, "dropped", now, section_id=reg["section_id"], household_id=household_id, participant_id=reg["participant_id"])
-        _, waiting = _counts(conn, reg["section_id"])
-        if waiting:
-            # Seat is held for staff outreach, not released to the public.
+        enrolled, waiting = _counts(conn, reg["section_id"])
+        capacity = _section(conn, reg["section_id"])["capacity"]
+        if waiting and capacity - enrolled <= waiting:
+            # This seat is held for staff outreach. (If more seats are free than people waiting,
+            # it goes to the public instead and isn't a "seat freed while a waitlist exists".)
             _log(conn, "seat_freed", now, section_id=reg["section_id"])
         return f"{reg['first_name']} was dropped."
 

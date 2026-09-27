@@ -39,7 +39,7 @@ The database file is `data/app.db`. It's created and seeded on first request. De
 | **Age gate**: whole years **as of the section start date** | We store the date of birth, never the age. A child who is 8 at signup but 9 by the first class is judged as 9. |
 | **Registration opens at a specific time** per program | Cheap, clearly needed, and it's where the rush to be first happens |
 | **Waitlist, with promotion by staff** instead of automatic promotion | See the pushback below. Staff can only act on the **first person in line**, and the server rejects anything out of order, so fairness is enforced by code rather than left to staff discretion. |
-| **A freed seat is held for the waitlist** | When someone drops, the public still sees "Full" while anyone is waiting. Otherwise a newcomer could take the seat the waitlist was promised. Staff can only record "declined" or "unreachable" when a seat is actually free to offer. |
+| **Freed seats are held for the waitlist, one per person waiting** | When someone drops, the public still sees "Full" while anyone is waiting. Otherwise a newcomer could take the seat the waitlist was promised. Seats beyond the number of people waiting go straight back to the public, so none sit empty for nobody. Staff can only record "declined" or "unreachable" when a seat is actually free to offer. |
 | **Decision metrics** on the Staff page | The pushback needs a data-backed way to get to "yes" |
 
 ### Data model (`schema.sql`)
@@ -103,7 +103,6 @@ It rewards whoever clicks fastest. That's fine for now, but for high-demand prog
 ## What I'd do next
 
 1. Agree the metric thresholds with stakeholders, and settle the siblings-together promotion rule using the decline-reason data.
-1. Hold only as many freed seats as there are people waiting. Today, if 2 seats free up and 1 person is waiting, both are held until staff act.
 2. Postgres + real auth (household accounts, staff roles), with row locks replacing `BEGIN IMMEDIATE`.
 3. Email/SMS for outreach, with a "reply to accept" link, which leads naturally to automated offers with a consent hold.
 4. Payments that charge only when a family accepts, with idempotency keys.
@@ -143,4 +142,4 @@ What it tried that held up:
 - XSS
 - birthday, leap-day and exact-second boundaries
 
-One trade-off it flagged that I kept (holding more freed seats than there are people waiting) is listed in *What I'd do next*.
+It also flagged a design trade-off: if 2 seats freed up with 1 person waiting, both were held. **I changed the rule** so only one seat is held per person waiting, and the surplus goes back to the public.
