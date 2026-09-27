@@ -21,6 +21,20 @@ def test_pages_render(tmp_path):
     assert c.get("/api/metrics").status_code == 200
 
 
+def _card(html: str, section_id: int) -> str:
+    start = html.index(f'id="section-{section_id}"')
+    return html[start:html.index("</article>", start)]
+
+
+def test_cards_list_only_eligible_people_by_name(tmp_path):
+    html = client(tmp_path).get("/").text  # Patel: Ava 8, Ben 6, Maya 4
+    swim2 = _card(html, SWIM2_THU)         # ages 6–8
+    assert "Ava" in swim2 and "Ben" in swim2 and "Maya" not in swim2
+    assert "at start" not in html
+    swim3 = _card(html, 4)                 # ages 9–12: nobody fits
+    assert "No one in your household fits" in swim3
+
+
 def test_more_people_than_seats_asks_who_gets_them(tmp_path):
     c = client(tmp_path)
     r = c.post(f"/sections/{SWIM2_THU}/register", data={"participant_ids": [AVA, BEN]})
@@ -45,6 +59,17 @@ def test_household_cookie_switch_and_reset(tmp_path):
     c.post("/household", data={"household_id": GARCIA}, follow_redirects=False)
     assert "Garcia household" in c.get("/").text
     c.post("/demo/reset")
+    assert c.get("/api/metrics").json()["seats_freed"] == 0
+
+
+def test_reset_works_after_a_waitlist_promotion(tmp_path):
+    # registrations.waitlist_entry_id → waitlist_entries: reset must delete registrations first.
+    c = client(tmp_path)
+    c.cookies.set("household_id", str(GARCIA))
+    c.get("/")
+    c.post("/registrations/1/drop")                              # Sofia frees a seat in Swim L2 Tue
+    assert "enrolled from the waitlist" in c.post(f"/staff/sections/{SWIM2_TUE}/entries/1/enroll").text
+    assert c.post("/demo/reset").status_code == 200
     assert c.get("/api/metrics").json()["seats_freed"] == 0
 
 

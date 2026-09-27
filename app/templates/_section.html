@@ -10,22 +10,30 @@
     {{ s.ages }} · {{ s.price_cents | money }} · {{ s.enrolled }}/{{ s.capacity }} enrolled{% if s.waiting %} · {{ s.waiting }} waiting{% endif %}
   </p>
 
+  {# Only people who can actually sign up are listed; the server still enforces every rule. #}
+  {% set eligible = s.options | rejectattr('blocked') | list %}
   <form>
+    {% if eligible %}
     <fieldset>
-      {% for o in s.options %}
+      {% for o in eligible %}
       <label>
-        <input type="checkbox" name="participant_ids" value="{{ o.id }}" {% if o.blocked or s.state == 'opens' %}disabled{% endif %}>
-        {{ o.name }} <span class="muted">(age {{ o.age }} at start{% if o.blocked %}, {{ o.blocked }}{% endif %})</span>
+        <input type="checkbox" name="participant_ids" value="{{ o.id }}" {% if s.state == 'opens' %}disabled{% endif %}>
+        {{ o.name }}
       </label>
       {% endfor %}
     </fieldset>
     {% if s.state == 'open' %}
-      <button hx-post="/sections/{{ s.id }}/register" hx-target="#main" hx-swap="outerHTML" {% if not s.can_act %}disabled{% endif %}>Register</button>
+      <button hx-post="/sections/{{ s.id }}/register" hx-target="#main" hx-swap="outerHTML">Register</button>
     {% elif s.state == 'full' %}
-      <button class="secondary" hx-post="/sections/{{ s.id }}/waitlist" hx-target="#main" hx-swap="outerHTML" {% if not s.can_act %}disabled{% endif %}>I'm interested</button>
+      <button class="secondary" hx-post="/sections/{{ s.id }}/waitlist" hx-target="#main" hx-swap="outerHTML">I'm interested</button>
       <p class="muted">This section is full. Join the waitlist and we'll reach out if a seat opens up.</p>
     {% else %}
       <button disabled>Registration not open yet</button>
+    {% endif %}
+    {% elif s.options | selectattr('blocked', 'in', ['enrolled', 'on waitlist']) | list %}
+    <p class="muted">Everyone in your household who fits this section is already signed up.</p>
+    {% else %}
+    <p class="muted">No one in your household fits this section's ages.</p>
     {% endif %}
   </form>
 

@@ -32,6 +32,13 @@ Running log of what the AI (Claude Code, Opus) proposed and where I overrode or 
 | 14 | `participants.first_name` → `name` | Renamed |
 | 15 | While in the schema, Claude also added: status↔timestamp consistency CHECKs, a unique household email (case-insensitive), foreign-key and queue indexes, and a `max_age >= 0` bound. It skipped STRICT tables because they don't allow a `DATE` column type. | Applied |
 
+## UI/UX pass
+
+| # | What happened | Outcome |
+|---|---|---|
+| 16 | Section cards listed every household member with notes like "(age 8 at start, ages 6–8 only)". Accurate but confusing. | **I overrode it:** list only the names of people who can actually sign up. If nobody fits, say so in one line. The server still enforces every rule. |
+| 17 | While Claude was checking that change in the browser, it noticed a "clean" reset still showed old data. The schema change (`waitlist_entry_id` FK) had broken **Reset**: it deleted waitlist entries before the registrations pointing at them, so the foreign-key check failed after any waitlist promotion. It hit the live site too. | Fixed the delete order. Added a test that fails without the fix. Redeployed. |
+
 ## Adversarial review ("try to break it")
 
 I had a separate Claude subagent attack the code: races, authz via cookie tampering, boundaries, metrics, web layer, DB init. It ran real probes. It reported 6 confirmed findings:

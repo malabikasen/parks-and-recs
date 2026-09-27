@@ -9,7 +9,7 @@ Parents browse programs and register household members for sections that have li
 Logins are fake. Pick a household from the **Acting as** dropdown. Use **Reset demo data** at any time to replay the scenarios.
 
 1. **Siblings, one seat left.** As *Patel*, open **Swim Level 2 – Thu**. Tick Ava and Ben, then click **Register**. A popup says *"Only 1 seat left. Who should get it?"*. Pick one, keep "Put the others on the waitlist together" ticked, and confirm.
-2. **Age gate.** Maya (4) is greyed out for Level 2, which is for ages 6–8. Because of age limits, siblings often end up in different sections.
+2. **Age gate.** Maya (4) isn't listed for Level 2, which is for ages 6–8. Each card lists only the people who can actually sign up. Because of age limits, siblings often end up in different sections.
 3. **A freed seat is held.** Switch to *Garcia* and drop Sofia from **Swim L2 – Tue**. The section now shows 1/2 enrolled but still says **Full**, because the seat is held for the Nguyen siblings already waiting.
 4. **Staff go in order.** Open **Staff**. Click **Enroll** on #2 (Noah) and it's rejected. Then either enroll #1 (Lily), or mark her **Declined → "Wanted family members placed together"** (only one seat opened for two siblings). Either way, the outcome is recorded.
 5. **Metrics.** Further down the Staff page is the data that would decide whether automated promotion is worth building.
@@ -21,7 +21,7 @@ Logins are fake. Pick a household from the **Acting as** dropdown. Use **Reset d
 brew install uv          # or see https://docs.astral.sh/uv/
 uv sync
 uv run uvicorn main:app --reload     # http://localhost:8000 (API docs at /docs)
-uv run pytest -q                     # 35 tests, including a 20-thread race for the last seat
+uv run pytest -q                     # 37 tests, including a 20-thread race for the last seat
 ```
 
 The database file is `data/app.db`. It's created and seeded on first request. Delete it, or click Reset, to start over.
@@ -127,7 +127,9 @@ It rewards whoever clicks fastest. That's fine for now, but for high-demand prog
 - **Waitlist promotion:** it proposed *auto-offer with a 48h hold*. I pushed back on automating anything yet. The waitlist records interest, staff reach out, and metrics decide later.
 - **Siblings on the waitlist:** it treated waitlist entries as independent. I raised that **families expect siblings to be promoted together**, and asked what happens if only one seat opens. That became the open question above, plus the `request_id` column and the `wanted_siblings_together` decline reason.
 - **Sibling discount:** it argued the spec was ambiguous. I pushed back on the *premise*, that a discount drives signups, which hasn't been tested.
-- **Partial sibling registration:** its first version silently enrolled whichever child was ticked first. I called that bad UX and asked for the **"who gets the last seat?" popup**.
+- **UI/UX judgment:**
+  - *Partial sibling registration.* Its first version silently enrolled whichever child was ticked first. I called that bad UX and asked for the **"who gets the last seat?" popup**.
+  - *The sign-up list.* Cards listed every household member, with notes like "(age 8 at start, ages 6–8 only)". I found that confusing and cut it to **only the names of people who can sign up**. The age range is already on the card, and the server still enforces every rule.
 - **UI scope:** I changed my mind mid-plan from a CLI demo to a minimal UI deployed live, so reviewers can test it in 2 minutes.
 - **Schema:** it caught a gap in what we'd agreed (`children` can't represent Senior Fitness adults), and I chose to rename the table to `participants`.
 

@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_PATH = ROOT / "schema.sql"
 
 # Order matters for wiping: referencing tables first (foreign keys are enforced).
-TABLES = ["events", "waitlist_entries", "registrations", "sections", "programs", "participants", "households"]
+TABLES = ["events", "registrations", "waitlist_entries", "sections", "programs", "participants", "households"]
 
 _init_lock = threading.Lock()
 _ready: set[str] = set()
