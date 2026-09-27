@@ -52,7 +52,7 @@ def test_cannot_act_for_another_household(conn):
 # ---------------------------------------------------------------- age gate + open time
 
 def _add_participant(conn, dob: date) -> int:
-    return conn.execute("INSERT INTO participants (household_id, first_name, date_of_birth) VALUES (?, 'Test', ?)",
+    return conn.execute("INSERT INTO participants (household_id, name, date_of_birth) VALUES (?, 'Test', ?)",
                         (PATEL, dob.isoformat())).lastrowid
 
 
@@ -125,6 +125,35 @@ def test_resolving_head_moves_queue_and_requires_reason(conn):
     assert e.value.code == "REASON_REQUIRED"
     domain.staff_resolve(conn, SWIM2_TUE, lily_entry, "declined", "wanted_siblings_together", "", NOW)
     assert domain._head(conn, SWIM2_TUE)["participant_id"] == NOAH
+
+
+def test_waitlist_enrollment_links_to_its_entry(conn):
+    domain.drop(conn, GARCIA, reg_id(conn, SWIM2_TUE, SOFIA), NOW)
+    entry = head_id(conn, SWIM2_TUE)
+    domain.staff_enroll(conn, SWIM2_TUE, entry, NOW)
+    linked = conn.execute("SELECT waitlist_entry_id FROM registrations WHERE section_id=? AND participant_id=?",
+                          (SWIM2_TUE, LILY)).fetchone()[0]
+    assert linked == entry
+    with pytest.raises(sqlite3.IntegrityError):  # one waitlist entry can't produce two seats
+        conn.execute("INSERT INTO registrations (section_id, participant_id, waitlist_entry_id, status, created_at) "
+                     "VALUES (?, ?, ?, 'enrolled', ?)", (SWIM2_THU, LILY, entry, iso(NOW)))
+
+
+def test_db_rejects_malformed_dates_and_timestamps(conn):
+    # 'next tuesday' and '20180228' slipped through `date(x) = x` (NULL CHECK passes); `IS` fixes it.
+    for bad in ("2018-02-30", "next tuesday", "20180228", ""):
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("INSERT INTO participants (household_id, name, date_of_birth) VALUES (?, 'X', ?)", (PATEL, bad))
+    for bad in ("2026-10-01 09:00:00", "2026-10-01T09:00:00+02:00", "soon"):
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE programs SET registration_opens_at = ? WHERE id = 1", (bad,))
+
+
+def test_db_rejects_status_timestamp_mismatch(conn):
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE registrations SET status = 'dropped' WHERE participant_id = ?", (SOFIA,))  # no dropped_at
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE waitlist_entries SET status = 'unreachable' WHERE participant_id = ?", (LILY,))  # no resolved_at
 
 
 def test_db_check_rejects_decline_without_reason(conn):
@@ -205,7 +234,7 @@ def test_register_split_is_all_or_nothing_if_seat_taken_meanwhile(conn):
     choice = domain.split_needed(conn, PATEL, SWIM2_THU, [AVA, BEN], NOW)
     assert choice.seats == 1
     # ...while the parent is looking at the popup, someone else takes the seat.
-    conn.execute("INSERT INTO participants (id, household_id, first_name, date_of_birth) "
+    conn.execute("INSERT INTO participants (id, household_id, name, date_of_birth) "
                  "SELECT 99, ?, 'Fast', date_of_birth FROM participants WHERE id = ?", (OKAFOR, ZARA))
     domain.register(conn, OKAFOR, SWIM2_THU, [99], NOW)
     with pytest.raises(DomainError) as e:

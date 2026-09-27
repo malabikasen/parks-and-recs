@@ -21,7 +21,7 @@ Logins are fake. Pick a household from the **Acting as** dropdown. Use **Reset d
 brew install uv          # or see https://docs.astral.sh/uv/
 uv sync
 uv run uvicorn main:app --reload     # http://localhost:8000 (API docs at /docs)
-uv run pytest -q                     # 31 tests, including a 20-thread race for the last seat
+uv run pytest -q                     # 35 tests, including a 20-thread race for the last seat
 ```
 
 The database file is `data/app.db`. It's created and seeded on first request. Delete it, or click Reset, to start over.
@@ -50,10 +50,16 @@ I designed the schema one decision at a time. The key choices:
 - **One queue entry per participant, plus a shared `request_id`.** Family members who join together are linked, but no rule is attached to that yet. It records how often families wait together, without committing to how to promote them (see the open question below).
 - **Queue position is derived from `id` order and never stored**, so there's no renumbering to get wrong.
 - **The enrolled count is always calculated from rows, never a stored counter.** Nothing can drift. The Postgres equivalent is `SELECT … FOR UPDATE` on the section row.
+- **A registration promoted from the waitlist points to the entry it came from** (`registrations.waitlist_entry_id`, UNIQUE, NULL for direct sign-ups), so every seat can be traced back to its place in line, and one entry can't produce two seats.
+- **Dates are typed by what they mean.** `DATE` is a calendar date with no time zone (date of birth, section start). `TIMESTAMP` is a moment in time, always UTC (open time, created, resolved). SQLite has no real date type, and a declared `DATE` is only a label, so each column also has a CHECK that enforces the format. That CHECK uses `date(x) IS x`, not `=`. For a value like `'next tuesday'`, `date()` returns NULL, and a NULL CHECK *passes* in SQLite. In Postgres these would be `DATE` and `TIMESTAMPTZ`.
 - **The database enforces invariants too:**
   - partial unique indexes: one active enrollment and one active waitlist entry per person per section
-  - `CHECK` constraints on statuses and capacity
+  - `CHECK` constraints on statuses, capacity and age bounds
   - `CHECK ((status = 'declined') = (reason IS NOT NULL))`: a decline can't be saved without a reason
+  - status and timestamp always agree: `dropped_at` is set exactly when a seat is dropped, and `resolved_at` is set exactly when an entry stops waiting
+  - a unique household email (case-insensitive), since the household is the account
+  - indexes on the foreign keys and on the waitlist queue
+- **Money is stored as integer cents**, never floats.
 - **Structured decline reasons** (`booked_elsewhere`, `wanted_siblings_together`, `schedule_changed`, `other`) turn the two concerns behind my pushback into numbers I can count.
 - **`participants`, not `children`.** Senior Fitness is in the brief, so an adult has to be able to register. Age limits already handle "60+" (`min_age = 60`, no max).
 - **An append-only `events` log** records things that have no row of their own ("a household saw a full section", "a seat freed while people were waiting"). It also serves as an audit trail when someone asks "why did they get the spot?".
@@ -124,6 +130,11 @@ It rewards whoever clicks fastest. That's fine for now, but for high-demand prog
 - **Partial sibling registration:** its first version silently enrolled whichever child was ticked first. I called that bad UX and asked for the **"who gets the last seat?" popup**.
 - **UI scope:** I changed my mind mid-plan from a CLI demo to a minimal UI deployed live, so reviewers can test it in 2 minutes.
 - **Schema:** it caught a gap in what we'd agreed (`children` can't represent Senior Fitness adults), and I chose to rename the table to `participants`.
+
+**My own review of the code:** after the build, I went through the schema myself.
+- **I found a bug in the waitlist link.** A seat promoted from the waitlist was only marked `source = 'waitlist'`, not *which* entry it came from, so staff couldn't trace a seat back to its place in line. I had it replaced with a `waitlist_entry_id` foreign key.
+- **I questioned why dates were plain `TEXT`.** Claude explained that SQLite has no native date type, so I had the columns declared `DATE` / `TIMESTAMP` to show what they mean, with CHECKs to enforce the format. Testing those CHECKs turned up a gotcha: `'next tuesday'` was accepted, because a NULL CHECK passes. Switching to `IS` fixed it, and it's now a test.
+- **I renamed `participants.first_name` to `name`.**
 
 **"Try to break it" review:** a separate subagent attacked the finished code with real probe scripts and found **6 confirmed bugs**, all fixed with regression tests:
 

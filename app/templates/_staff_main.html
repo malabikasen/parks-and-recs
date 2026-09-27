@@ -19,7 +19,7 @@
       {% for e in q.entries %}
       <tr class="{{ 'head' if loop.first }}">
         <td>{{ e.position }}</td>
-        <td>{{ e.first_name }}{% if e.together_with %}<br><small class="muted">joined with {{ e.together_with | join(', ') }}</small>{% endif %}</td>
+        <td>{{ e.name }}{% if e.together_with %}<br><small class="muted">joined with {{ e.together_with | join(', ') }}</small>{% endif %}</td>
         <td>{{ e.household_name }}<br><small class="muted">{{ e.email }} · {{ e.phone }}</small></td>
         <td><small>{{ e.joined_at | when }}</small></td>
         <td>

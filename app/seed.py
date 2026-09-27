@@ -34,7 +34,7 @@ def seed(conn, now: datetime | None = None) -> None:
         (4, "Nguyen", "linh.nguyen@example.com", "555-0104"),
         (5, "Okafor", "chi.okafor@example.com", "555-0105"),
     ])
-    conn.executemany("INSERT INTO participants (id, household_id, first_name, date_of_birth) VALUES (?, ?, ?, ?)", [
+    conn.executemany("INSERT INTO participants (id, household_id, name, date_of_birth) VALUES (?, ?, ?, ?)", [
         (1, 1, "Ava", _years_before(start, 8)),
         (2, 1, "Ben", _years_before(start, 6)),
         (3, 1, "Maya", _years_before(start, 4)),
@@ -67,8 +67,8 @@ def seed(conn, now: datetime | None = None) -> None:
 
     t = iso(now - timedelta(hours=20))
     for section_id, participant_id, household_id in [(2, 6, 3), (2, 4, 2), (3, 10, 5), (4, 7, 3)]:
-        conn.execute("INSERT INTO registrations (section_id, participant_id, status, source, created_at) "
-                     "VALUES (?, ?, 'enrolled', 'direct', ?)", (section_id, participant_id, t))
+        conn.execute("INSERT INTO registrations (section_id, participant_id, status, created_at) "
+                     "VALUES (?, ?, 'enrolled', ?)", (section_id, participant_id, t))
         conn.execute("INSERT INTO events (type, section_id, household_id, participant_id, at) VALUES ('registered', ?, ?, ?, ?)",
                      (section_id, household_id, participant_id, t))
 

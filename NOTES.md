@@ -22,6 +22,16 @@ Running log of what the AI (Claude Code, Opus) proposed and where I overrode or 
 | 9 | While seeding, the AI noticed the co-designed `children` table can't represent **Senior Fitness** participants (adults) | I chose to rename it to `participants` (age limits already handle "60+") |
 | 10 | The AI's first version silently **partially filled** siblings: with 1 seat left, the first child ticked got it and the other was told "full" | **I overrode this as bad UX.** I asked for a popup: "Only 1 seat left. Who should get it? Put the others on the waitlist together." It's all-or-nothing, so if the seat is taken while the parent decides, nothing is written. |
 
+## My own review of the code
+
+| # | What I found | Outcome |
+|---|---|---|
+| 11 | **A bug in the waitlist link.** A registration promoted from the waitlist only said `source = 'waitlist'`, not *which* entry, so there was no audit trail from a seat back to its place in line. | Replaced `source` with `registrations.waitlist_entry_id` (a UNIQUE foreign key, NULL means direct). One entry can't produce two seats. |
+| 12 | **Why are dates `TEXT`?** | Claude explained that SQLite has no native date type. I still wanted the schema to say what each column means, so we declared `DATE` (calendar dates) and `TIMESTAMP` (UTC moments), each with a CHECK that enforces the format. |
+| 13 | While testing those CHECKs, `'next tuesday'` and `'20180228'` were **accepted**: `date(x) = x` gives NULL, and SQLite treats a NULL CHECK as passing | Switched to the null-safe `date(x) IS x`, with a regression test |
+| 14 | `participants.first_name` → `name` | Renamed |
+| 15 | While in the schema, Claude also added: status↔timestamp consistency CHECKs, a unique household email (case-insensitive), foreign-key and queue indexes, and a `max_age >= 0` bound. It skipped STRICT tables because they don't allow a `DATE` column type. | Applied |
+
 ## Adversarial review ("try to break it")
 
 I had a separate Claude subagent attack the code: races, authz via cookie tampering, boundaries, metrics, web layer, DB init. It ran real probes. It reported 6 confirmed findings:

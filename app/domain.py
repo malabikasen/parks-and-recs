@@ -142,7 +142,7 @@ def age_problem(section: sqlite3.Row, participant: sqlite3.Row) -> str | None:
     lo, hi = section["min_age"], section["max_age"]
     if (lo is not None and age < lo) or (hi is not None and age > hi):
         return (
-            f"{participant['first_name']} will be {age} when the section starts; "
+            f"{participant['name']} will be {age} when the section starts; "
             f"this section is {age_range_label(lo, hi).lower()}."
         )
     return None
@@ -150,7 +150,7 @@ def age_problem(section: sqlite3.Row, participant: sqlite3.Row) -> str | None:
 
 def _check_can_join(conn, section, participant, now: datetime) -> None:
     """Rules shared by registering and joining the waitlist."""
-    name = participant["first_name"]
+    name = participant["name"]
     if not is_open(section, now):
         raise DomainError("REGISTRATION_NOT_OPEN", f"Registration opens {friendly_ts(section['registration_opens_at'])}.")
     problem = age_problem(section, participant)
@@ -173,7 +173,7 @@ def _for_each_participant(conn, household_id, participant_ids, action) -> list[O
             participant = _participant(conn, pid)
             if participant["household_id"] != household_id:
                 raise DomainError("NOT_IN_HOUSEHOLD", "That person isn't in your household.")
-            name = participant["first_name"]
+            name = participant["name"]
             outcomes.append(Outcome(pid, name, True, action(participant)))
         except DomainError as e:
             outcomes.append(Outcome(pid, name, False, e.message, e.code))
@@ -187,14 +187,13 @@ def _enroll_one(conn, section, participant, household_id: int, now: datetime) ->
     _check_can_join(conn, section, participant, now)
     enrolled, waiting = _counts(conn, section["id"])
     if public_seats(section["capacity"], enrolled, waiting) == 0:
-        raise DomainError("SECTION_FULL", f"No seat left for {participant['first_name']}. You can join the waitlist.")
+        raise DomainError("SECTION_FULL", f"No seat left for {participant['name']}. You can join the waitlist.")
     conn.execute(
-        "INSERT INTO registrations (section_id, participant_id, status, source, created_at) "
-        "VALUES (?, ?, 'enrolled', 'direct', ?)",
+        "INSERT INTO registrations (section_id, participant_id, status, created_at) VALUES (?, ?, 'enrolled', ?)",
         (section["id"], participant["id"], iso(now)),
     )
     _log(conn, "registered", now, section_id=section["id"], household_id=household_id, participant_id=participant["id"])
-    return f"{participant['first_name']} is enrolled."
+    return f"{participant['name']} is enrolled."
 
 
 def _mark_full_seen(conn, section_id: int, household_id: int, now: datetime) -> None:
@@ -222,7 +221,7 @@ def _waitlist_one(conn, section, participant, household_id: int, request_id: str
     _log(conn, "waitlist_joined", now, section_id=section["id"], household_id=household_id,
          participant_id=participant["id"], request_id=request_id)
     entry = conn.execute("SELECT * FROM waitlist_entries WHERE id = ?", (cur.lastrowid,)).fetchone()
-    return (f"{participant['first_name']} is #{_position(conn, entry)} on the waitlist. "
+    return (f"{participant['name']} is #{_position(conn, entry)} on the waitlist. "
             "We'll reach out if a seat opens up.")
 
 
@@ -263,7 +262,7 @@ def split_needed(conn, household_id: int, section_id: int, participant_ids: list
             if participant["household_id"] != household_id:
                 raise DomainError("NOT_IN_HOUSEHOLD", "That person isn't in your household.")
             _check_can_join(conn, section, participant, now)
-            eligible.append({"id": pid, "name": participant["first_name"]})
+            eligible.append({"id": pid, "name": participant["name"]})
         except DomainError as e:
             blocked.append(Outcome(pid, f"#{pid}", False, e.message, e.code))
     if 0 < seats < len(eligible):
@@ -296,10 +295,10 @@ def register_split(conn, household_id: int, section_id: int, enroll_ids: list[in
 
         for pid in enroll_ids:
             p = own(pid)
-            outcomes.append(Outcome(pid, p["first_name"], True, _enroll_one(conn, section, p, household_id, now)))
+            outcomes.append(Outcome(pid, p["name"], True, _enroll_one(conn, section, p, household_id, now)))
         for pid in waitlist_ids:
             p = own(pid)
-            outcomes.append(Outcome(pid, p["first_name"], True,
+            outcomes.append(Outcome(pid, p["name"], True,
                                     _waitlist_one(conn, section, p, household_id, request_id, now)))
     return outcomes
 
@@ -307,7 +306,7 @@ def register_split(conn, household_id: int, section_id: int, enroll_ids: list[in
 def drop(conn, household_id: int, registration_id: int, now: datetime) -> str:
     with write_tx(conn):
         reg = conn.execute(
-            """SELECT r.*, p.household_id, p.first_name FROM registrations r
+            """SELECT r.*, p.household_id, p.name FROM registrations r
                JOIN participants p ON p.id = r.participant_id WHERE r.id = ?""",
             (registration_id,),
         ).fetchone()
@@ -323,13 +322,13 @@ def drop(conn, household_id: int, registration_id: int, now: datetime) -> str:
             # This seat is held for staff outreach. (If more seats are free than people waiting,
             # it goes to the public instead and isn't a "seat freed while a waitlist exists".)
             _log(conn, "seat_freed", now, section_id=reg["section_id"])
-        return f"{reg['first_name']} was dropped."
+        return f"{reg['name']} was dropped."
 
 
 def withdraw(conn, household_id: int, entry_id: int, now: datetime) -> str:
     with write_tx(conn):
         entry = conn.execute(
-            """SELECT w.*, p.household_id, p.first_name FROM waitlist_entries w
+            """SELECT w.*, p.household_id, p.name FROM waitlist_entries w
                JOIN participants p ON p.id = w.participant_id WHERE w.id = ?""",
             (entry_id,),
         ).fetchone()
@@ -338,7 +337,7 @@ def withdraw(conn, household_id: int, entry_id: int, now: datetime) -> str:
         conn.execute("UPDATE waitlist_entries SET status = 'withdrawn', resolved_at = ? WHERE id = ?", (iso(now), entry_id))
         _log(conn, "waitlist_resolved", now, section_id=entry["section_id"], household_id=household_id,
              participant_id=entry["participant_id"], request_id=entry["request_id"])
-        return f"{entry['first_name']} left the waitlist."
+        return f"{entry['name']} left the waitlist."
 
 
 # ---------------------------------------------------------------- staff actions
@@ -362,16 +361,16 @@ def staff_enroll(conn, section_id: int, entry_id: int, now: datetime) -> str:
             raise DomainError("NO_SEAT_AVAILABLE", "No free seat yet. Wait for someone to drop.")
         participant = _participant(conn, head["participant_id"])
         if _is_enrolled(conn, section_id, participant["id"]):
-            raise DomainError("ALREADY_REGISTERED", f"{participant['first_name']} is already enrolled.")
+            raise DomainError("ALREADY_REGISTERED", f"{participant['name']} is already enrolled.")
         conn.execute(
-            "INSERT INTO registrations (section_id, participant_id, status, source, created_at) "
-            "VALUES (?, ?, 'enrolled', 'waitlist', ?)",
-            (section_id, participant["id"], iso(now)),
+            "INSERT INTO registrations (section_id, participant_id, waitlist_entry_id, status, created_at) "
+            "VALUES (?, ?, ?, 'enrolled', ?)",
+            (section_id, participant["id"], entry_id, iso(now)),
         )
         conn.execute("UPDATE waitlist_entries SET status = 'enrolled', resolved_at = ? WHERE id = ?", (iso(now), entry_id))
         _log(conn, "waitlist_enrolled", now, section_id=section_id, household_id=participant["household_id"],
              participant_id=participant["id"], request_id=head["request_id"])
-        return f"{participant['first_name']} enrolled from the waitlist."
+        return f"{participant['name']} enrolled from the waitlist."
 
 
 def staff_resolve(conn, section_id: int, entry_id: int, outcome: str, reason: str | None, note: str | None,
@@ -397,7 +396,7 @@ def staff_resolve(conn, section_id: int, entry_id: int, outcome: str, reason: st
         participant = _participant(conn, head["participant_id"])
         _log(conn, "waitlist_resolved", now, section_id=section_id, household_id=participant["household_id"],
              participant_id=participant["id"], request_id=head["request_id"])
-        return f"{participant['first_name']} marked {outcome}."
+        return f"{participant['name']} marked {outcome}."
 
 
 # ---------------------------------------------------------------- read models
@@ -441,7 +440,7 @@ def program_cards(conn, household_id: int, now: datetime) -> list[dict]:
                 else:
                     blocked = None
                 age = age_on(date.fromisoformat(m["date_of_birth"]), date.fromisoformat(s["start_date"]))
-                options.append({"id": m["id"], "name": m["first_name"], "age": age, "blocked": blocked})
+                options.append({"id": m["id"], "name": m["name"], "age": age, "blocked": blocked})
             sections.append({
                 "id": s["id"], "name": s["name"], "schedule": s["schedule"], "start_date": s["start_date"],
                 "ages": age_range_label(s["min_age"], s["max_age"]), "price_cents": s["price_cents"],
@@ -472,14 +471,14 @@ def record_full_seen(conn, household_id: int, cards: list[dict], now: datetime) 
 
 def my_registrations(conn, household_id: int) -> dict:
     enrolled = conn.execute(
-        """SELECT r.id, p.first_name, s.name AS section_name, s.schedule, r.source
+        """SELECT r.id, p.name, s.name AS section_name, s.schedule, r.waitlist_entry_id
            FROM registrations r JOIN participants p ON p.id = r.participant_id JOIN sections s ON s.id = r.section_id
            WHERE p.household_id = ? AND r.status = 'enrolled' ORDER BY r.id""", (household_id,)).fetchall()
     entries = conn.execute(
-        """SELECT w.*, p.first_name, s.name AS section_name FROM waitlist_entries w
+        """SELECT w.*, p.name, s.name AS section_name FROM waitlist_entries w
            JOIN participants p ON p.id = w.participant_id JOIN sections s ON s.id = w.section_id
            WHERE p.household_id = ? AND w.status = 'waiting' ORDER BY w.id""", (household_id,)).fetchall()
-    waiting = [{"id": e["id"], "first_name": e["first_name"], "section_name": e["section_name"],
+    waiting = [{"id": e["id"], "name": e["name"], "section_name": e["section_name"],
                 "position": _position(conn, e)} for e in entries]
     return {"enrolled": enrolled, "waiting": waiting}
 
@@ -488,7 +487,7 @@ def staff_queues(conn) -> list[dict]:
     queues = []
     for s in conn.execute("SELECT * FROM sections ORDER BY id").fetchall():
         rows = conn.execute(
-            """SELECT w.*, p.first_name, h.name AS household_name, h.email, h.phone
+            """SELECT w.*, p.name, h.name AS household_name, h.email, h.phone
                FROM waitlist_entries w JOIN participants p ON p.id = w.participant_id
                JOIN households h ON h.id = p.household_id
                WHERE w.section_id = ? AND w.status = 'waiting' ORDER BY w.id""", (s["id"],)).fetchall()
@@ -497,11 +496,11 @@ def staff_queues(conn) -> list[dict]:
         enrolled, _ = _counts(conn, s["id"])
         by_request: dict[str, list[str]] = {}
         for r in rows:
-            by_request.setdefault(r["request_id"], []).append(r["first_name"])
+            by_request.setdefault(r["request_id"], []).append(r["name"])
         entries = [{
-            "id": r["id"], "position": i + 1, "first_name": r["first_name"], "household_name": r["household_name"],
+            "id": r["id"], "position": i + 1, "name": r["name"], "household_name": r["household_name"],
             "email": r["email"], "phone": r["phone"], "joined_at": r["created_at"], "request_id": r["request_id"],
-            "together_with": [n for n in by_request[r["request_id"]] if n != r["first_name"]],
+            "together_with": [n for n in by_request[r["request_id"]] if n != r["name"]],
         } for i, r in enumerate(rows)]
         queues.append({"id": s["id"], "name": s["name"], "capacity": s["capacity"], "enrolled": enrolled,
                        "free": s["capacity"] - enrolled, "entries": entries})

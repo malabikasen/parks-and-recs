@@ -16,7 +16,7 @@ def test_last_seat_race(tmp_path):
     racers = []
     for i in range(N):
         hid = setup.execute("INSERT INTO households (name, email) VALUES (?, ?)", (f"Racer {i}", f"r{i}@x.test")).lastrowid
-        pid = setup.execute("INSERT INTO participants (household_id, first_name, date_of_birth) VALUES (?, ?, date(?, '-7 years'))",
+        pid = setup.execute("INSERT INTO participants (household_id, name, date_of_birth) VALUES (?, ?, date(?, '-7 years'))",
                             (hid, f"Kid {i}", start)).lastrowid
         racers.append((hid, pid))
     setup.close()
