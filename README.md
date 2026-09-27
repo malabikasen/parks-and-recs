@@ -108,11 +108,13 @@ It rewards whoever clicks fastest. That's fine for now, but for high-demand prog
 
 ## What I'd do next
 
-1. Agree the metric thresholds with stakeholders, and settle the siblings-together promotion rule using the decline-reason data.
-2. Postgres + real auth (household accounts, staff roles), with row locks replacing `BEGIN IMMEDIATE`.
-3. Email/SMS for outreach, with a "reply to accept" link, which leads naturally to automated offers with a consent hold.
-4. Payments that charge only when a family accepts, with idempotency keys.
-5. A lottery window for high-demand openings.
+### Product: validate before building
+1. **Run the waitlist for a term, then decide on automation.** Agree the thresholds on the Staff page with stakeholders, collect a term of real data, and only then decide. Build automated offers with a consent hold (never auto-charging) only if seats freed, outreach conversion and time to fill all clear the bar.
+2. **Research before any sibling discount.** Run feedback sessions with 5–8 families, recruited with a query the schema already supports: households with several age-eligible members but only one enrolled. Find out what actually stops more signups (schedules, age limits, interest or price), and build what the evidence supports.
+
+### Engineering
+1. **Postgres + real auth.** Durable storage instead of Vercel's `/tmp`. Household accounts (e.g. magic-link login) and staff roles replace the demo cookie and the open Staff pages. `SELECT … FOR UPDATE` on the section row replaces `BEGIN IMMEDIATE`, and `DATE` / `TIMESTAMPTZ` become native types. Otherwise the schema carries over unchanged. This comes first because everything else depends on real accounts and data that persists.
+2. **Outreach notifications.** Email/SMS the family at the head of the queue when a seat is held for them, with a "reply to accept" link. It cuts staff effort, and it leads directly to automated offers if the data says yes.
 
 ---
 

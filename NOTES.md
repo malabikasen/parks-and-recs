@@ -39,6 +39,12 @@ Running log of what the AI (Claude Code, Opus) proposed and where I overrode or 
 | 16 | Section cards listed every household member with notes like "(age 8 at start, ages 6–8 only)". Accurate but confusing. | **I overrode it:** list only the names of people who can actually sign up. If nobody fits, say so in one line. The server still enforces every rule. |
 | 17 | While Claude was checking that change in the browser, it noticed a "clean" reset still showed old data. The schema change (`waitlist_entry_id` FK) had broken **Reset**: it deleted waitlist entries before the registrations pointing at them, so the foreign-key check failed after any waitlist promotion. It hit the live site too. | Fixed the delete order. Added a test that fails without the fix. Redeployed. |
 
+## Next steps
+
+| # | What happened | Outcome |
+|---|---|---|
+| 18 | Claude had written the "What I'd do next" list on its own, and it wasn't in the Loom script at all | **I chose the items and the framing myself.** Product: run the waitlist then decide, and sibling-discount research. Engineering: Postgres + real auth, then outreach notifications. I left out payments, the lottery, admin tools and the siblings rule. |
+
 ## Adversarial review ("try to break it")
 
 I had a separate Claude subagent attack the code: races, authz via cookie tampering, boundaries, metrics, web layer, DB init. It ran real probes. It reported 6 confirmed findings:
