@@ -8,13 +8,12 @@ Parents browse programs and register household members for sections that have li
 
 Logins are fake. Pick a household from the **Acting as** dropdown. Use **Reset demo data** at any time to replay the scenarios.
 
-1. **Siblings, one seat left.** As *Patel*, open **Swim Level 2 – Thu**. Tick Ava and Ben, then click **Register**. Ava gets the last seat, and Ben is told the section is full.
+1. **Siblings, one seat left.** As *Patel*, open **Swim Level 2 – Thu**. Tick Ava and Ben, then click **Register**. A popup says *"Only 1 seat left. Who should get it?"*. Pick one, keep "Put the others on the waitlist together" ticked, and confirm.
 2. **Age gate.** Maya (4) is greyed out for Level 2, which is for ages 6–8. Because of age limits, siblings often end up in different sections.
-3. **Waitlist.** Tick Ben and click **I'm interested**. He's now #1 on the Thu waitlist ("We'll reach out if a seat opens up").
-4. **A freed seat is held.** Switch to *Garcia* and drop Sofia from **Swim L2 – Tue**. The section now shows 1/2 enrolled but still says **Full**, because the seat is held for the Nguyen siblings already waiting.
-5. **Staff go in order.** Open **Staff**. Click **Enroll** on #2 (Noah) and it's rejected. Enroll #1 (Lily). Now Noah is first, but there's no seat, so mark him **Declined → "Wanted family members placed together"**.
-6. **Metrics.** Further down the Staff page is the data that would decide whether automated promotion is worth building.
-7. **Registration window.** Basketball Camp opens in 7 days, so its sections can't be registered for yet.
+3. **A freed seat is held.** Switch to *Garcia* and drop Sofia from **Swim L2 – Tue**. The section now shows 1/2 enrolled but still says **Full**, because the seat is held for the Nguyen siblings already waiting.
+4. **Staff go in order.** Open **Staff**. Click **Enroll** on #2 (Noah) and it's rejected. Then either enroll #1 (Lily), or mark her **Declined → "Wanted family members placed together"** (only one seat opened for two siblings). Either way, the outcome is recorded.
+5. **Metrics.** Further down the Staff page is the data that would decide whether automated promotion is worth building.
+6. **Registration window.** Basketball Camp opens in 7 days, so its sections can't be registered for yet.
 
 ## Run locally
 
@@ -22,7 +21,7 @@ Logins are fake. Pick a household from the **Acting as** dropdown. Use **Reset d
 brew install uv          # or see https://docs.astral.sh/uv/
 uv sync
 uv run uvicorn main:app --reload     # http://localhost:8000 (API docs at /docs)
-uv run pytest -q                     # 18 tests, including a 20-thread race for the last seat
+uv run pytest -q                     # 31 tests, including a 20-thread race for the last seat
 ```
 
 The database file is `data/app.db`. It's created and seeded on first request. Delete it, or click Reset, to start over.
@@ -35,11 +34,12 @@ The database file is `data/app.db`. It's created and seeded on first request. De
 |---|---|
 | Browsing programs → sections, showing seats, waitlist size, age range and open time | Core requirement |
 | Registering several household members at once, with **one result per person** | Parents often register more than one child. One ineligible child shouldn't block their siblings. |
+| **"Who gets the last seat?" popup** | When there are more eligible children than seats, the parent chooses who gets them, and the others can join the waitlist together. It's all-or-nothing, so if the seat is taken while they decide, nothing is written and they're asked to choose again. |
 | **Capacity enforced under concurrency** | The check-then-insert runs inside `BEGIN IMMEDIATE`. A test sends 20 parents at the last seat at once, and exactly one wins. |
 | **Age gate**: whole years **as of the section start date** | We store the date of birth, never the age. A child who is 8 at signup but 9 by the first class is judged as 9. |
 | **Registration opens at a specific time** per program | Cheap, clearly needed, and it's where the rush to be first happens |
 | **Waitlist, with promotion by staff** instead of automatic promotion | See the pushback below. Staff can only act on the **first person in line**, and the server rejects anything out of order, so fairness is enforced by code rather than left to staff discretion. |
-| **A freed seat is held for the waitlist** | When someone drops, the public still sees "Full" while anyone is waiting. Otherwise a newcomer could take the seat the waitlist was promised. |
+| **A freed seat is held for the waitlist** | When someone drops, the public still sees "Full" while anyone is waiting. Otherwise a newcomer could take the seat the waitlist was promised. Staff can only record "declined" or "unreachable" when a seat is actually free to offer. |
 | **Decision metrics** on the Staff page | The pushback needs a data-backed way to get to "yes" |
 
 ### Data model (`schema.sql`)
@@ -95,7 +95,7 @@ It rewards whoever clicks fastest. That's fine for now, but for high-demand prog
 - **Payments and refunds.** There's no charging anywhere, and prices are display-only.
 - **Real authentication.** A cookie picks the household, but every parent action still checks that the person, registration or waitlist entry belongs to that household. The Staff pages are open in the demo.
 - **Notifications.** Staff reach out using the contact details shown on the Staff page.
-- **Keeping siblings together when registering directly.** Right now they can be split, one enrolled and one told it's full. It's the same open question as the waitlist one above.
+- **Automatic "keep siblings together".** When registering, the parent chooses via the popup. For waitlist promotion it's the open question above.
 - **Admin screens** for creating programs and sections, a registration close date, resident-priority windows, and schedule-conflict detection (the schedule is free text).
 - **Local time zones.** Times are stored and shown in UTC. A real department would store its time zone per program.
 - **Durable hosting.** On Vercel, SQLite lives in `/tmp`, which is per instance and temporary. That's fine for a demo with a Reset button. In production I'd use Postgres, and the schema carries over almost unchanged.
@@ -103,6 +103,7 @@ It rewards whoever clicks fastest. That's fine for now, but for high-demand prog
 ## What I'd do next
 
 1. Agree the metric thresholds with stakeholders, and settle the siblings-together promotion rule using the decline-reason data.
+1. Hold only as many freed seats as there are people waiting. Today, if 2 seats free up and 1 person is waiting, both are held until staff act.
 2. Postgres + real auth (household accounts, staff roles), with row locks replacing `BEGIN IMMEDIATE`.
 3. Email/SMS for outreach, with a "reply to accept" link, which leads naturally to automated offers with a consent hold.
 4. Payments that charge only when a family accepts, with idempotency keys.
@@ -112,4 +113,34 @@ It rewards whoever clicks fastest. That's fine for now, but for high-demand prog
 
 ## Tools & Process
 
-_Filled in from [NOTES.md](NOTES.md) after the adversarial review._
+**Tools:** Claude Code (Opus) in the desktop app, used for planning, writing the code, driving the in-app browser to click through the UI locally and on Vercel, and a separate Claude subagent that tried to break the code. uv, pytest, the Vercel CLI and the GitHub CLI handled the rest. The full running log is in [NOTES.md](NOTES.md).
+
+**How I used it:** I started in *plan mode* and made every product call myself before any code was written. Claude proposed options with trade-offs, and I picked or overrode them. I **co-designed the schema** with it one decision at a time instead of accepting its draft. Then it built in small committed steps, and I tested each flow in the browser.
+
+**Where I overrode or corrected the AI:**
+- **Stack:** it recommended TypeScript to match your stack. I chose Python/FastAPI, where I'm faster.
+- **Waitlist promotion:** it proposed *auto-offer with a 48h hold*. I pushed back on automating anything yet. The waitlist records interest, staff reach out, and metrics decide later.
+- **Siblings on the waitlist:** it treated waitlist entries as independent. I raised that **families expect siblings to be promoted together**, and asked what happens if only one seat opens. That became the open question above, plus the `request_id` column and the `wanted_siblings_together` decline reason.
+- **Sibling discount:** it argued the spec was ambiguous. I pushed back on the *premise*, that a discount drives signups, which hasn't been tested.
+- **Partial sibling registration:** its first version silently enrolled whichever child was ticked first. I called that bad UX and asked for the **"who gets the last seat?" popup**.
+- **UI scope:** I changed my mind mid-plan from a CLI demo to a minimal UI deployed live, so reviewers can test it in 2 minutes.
+- **Schema:** it caught a gap in what we'd agreed (`children` can't represent Senior Fitness adults), and I chose to rename the table to `participants`.
+
+**"Try to break it" review:** a separate subagent attacked the finished code with real probe scripts and found **6 confirmed bugs**, all fixed with regression tests:
+
+| Finding | Fix |
+|---|---|
+| Time-to-fill paired events by position, so one seat that went back to the public skewed every later pair (101h reported instead of 1h, which flipped the decision signal) | Pair each enrollment with the most recent unpaired freed seat |
+| Ids ≥ 2^63 caused a 500. A huge household cookie bricked the page. | Ids validated at the edge (→ 422), cookie range-checked |
+| Join-rate funnel skew: a drop counted as "saw full", and a crafted POST gave a 300% join rate | No view recorded after a drop or withdraw, and joining records the view |
+| Outreach conversion counted "declined" when no seat had been offered | **Changed a rule:** resolving requires a free seat. My own metrics test had this bug. |
+| Open redirect through `Referer` on the reset endpoint | Redirect only within the same site |
+| First-request DB init raced across processes | Schema and seed in one `BEGIN IMMEDIATE` (4-process test) |
+
+What it tried that held up:
+- 30 threads × 40 random operations with resets every 10ms: no overbooking, and nobody both enrolled and waiting
+- cross-household tampering
+- XSS
+- birthday, leap-day and exact-second boundaries
+
+One trade-off it flagged that I kept (holding more freed seats than there are people waiting) is listed in *What I'd do next*.

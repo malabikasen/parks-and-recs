@@ -1,6 +1,37 @@
 <div id="main">
   {% if flash %}<div class="flash {{ 'ok' if flash[0] else 'err' }}">{{ flash[1] }}</div>{% endif %}
 
+  {% if choice %}
+  <dialog open>
+    <article>
+      <header><strong>Only {{ choice.seats }} seat{{ '' if choice.seats == 1 else 's' }} left in {{ choice.section_name }}</strong></header>
+      <form>
+        <p>You selected {{ choice.eligible | length }} people. Who should get {{ 'it' if choice.seats == 1 else 'them' }}?
+          {% if choice.seats > 1 %}<span class="muted">(pick up to {{ choice.seats }})</span>{% endif %}</p>
+        <fieldset>
+          {% for p in choice.eligible %}
+          <input type="hidden" name="participant_ids" value="{{ p.id }}">
+          <label>
+            <input type="{{ 'radio' if choice.seats == 1 else 'checkbox' }}" name="enroll_ids" value="{{ p.id }}"
+                   {% if loop.index <= choice.seats %}checked{% endif %}>
+            {{ p.name }}
+          </label>
+          {% endfor %}
+        </fieldset>
+        <label>
+          <input type="checkbox" name="waitlist_rest" value="true" checked>
+          Put the others on the waitlist together <span class="muted">(we'll reach out if a seat opens up)</span>
+        </label>
+        {% for o in choice.blocked %}<p class="msg err">✗ {{ o.message }}</p>{% endfor %}
+        <footer>
+          <button type="button" class="secondary" onclick="this.closest('dialog').remove()">Cancel</button>
+          <button hx-post="/sections/{{ choice.section_id }}/register-split" hx-target="#main" hx-swap="outerHTML">Confirm</button>
+        </footer>
+      </form>
+    </article>
+  </dialog>
+  {% endif %}
+
   <article>
     <header><strong>{{ household.name }} household</strong> · my registrations</header>
     {% if not regs.enrolled and not regs.waiting %}<p class="muted">Nothing yet. Pick a section below.</p>{% endif %}

@@ -109,6 +109,7 @@ def test_staff_must_go_in_order(conn):
 
 
 def test_resolving_head_moves_queue_and_requires_reason(conn):
+    domain.drop(conn, GARCIA, reg_id(conn, SWIM2_TUE, SOFIA), NOW)  # a seat to offer
     lily_entry = head_id(conn, SWIM2_TUE)
     with pytest.raises(DomainError) as e:
         domain.staff_resolve(conn, SWIM2_TUE, lily_entry, "declined", None, None, NOW)
@@ -122,10 +123,17 @@ def test_db_check_rejects_decline_without_reason(conn):
         conn.execute("UPDATE waitlist_entries SET status='declined' WHERE participant_id=?", (LILY,))
 
 
+def test_resolving_requires_a_free_seat(conn):
+    # No seat → no offer was made → declining/unreachable would skew outreach conversion.
+    with pytest.raises(DomainError) as e:
+        domain.staff_resolve(conn, SWIM2_TUE, head_id(conn, SWIM2_TUE), "unreachable", None, None, NOW)
+    assert e.value.code == "NO_SEAT_AVAILABLE"
+
+
 def test_seat_returns_to_public_once_waitlist_is_empty(conn):
+    domain.drop(conn, KIM, reg_id(conn, SWIM2_TUE, LEO), NOW)
     for _ in range(2):
         domain.staff_resolve(conn, SWIM2_TUE, head_id(conn, SWIM2_TUE), "unreachable", None, None, NOW)
-    domain.drop(conn, KIM, reg_id(conn, SWIM2_TUE, LEO), NOW)
     assert codes(domain.register(conn, PATEL, SWIM2_TUE, [AVA], NOW)) == [None]
 
 
@@ -133,12 +141,66 @@ def test_seat_returns_to_public_once_waitlist_is_empty(conn):
 
 def test_metrics_track_outreach_outcomes(conn):
     domain.drop(conn, GARCIA, reg_id(conn, SWIM2_TUE, SOFIA), NOW)
+    domain.drop(conn, KIM, reg_id(conn, SWIM2_TUE, LEO), NOW)
     domain.staff_enroll(conn, SWIM2_TUE, head_id(conn, SWIM2_TUE), NOW + timedelta(hours=10))
     domain.staff_resolve(conn, SWIM2_TUE, head_id(conn, SWIM2_TUE), "declined", "booked_elsewhere", "", NOW)
     m = domain.metrics(conn)
-    assert m["seats_freed"] == 1
+    assert m["seats_freed"] == 2
     assert m["outreach_conversion"] == 0.5
     assert m["median_time_to_fill_hours"] == 10
     assert m["declines_by_reason"]["Booked something else"] == 1
     assert m["multi_person_request_share"] == 1.0  # the Nguyen siblings joined together
     assert m["build_automation"] is False
+
+
+# ---------------------------------------------------------------- regressions from the adversarial review
+
+def test_time_to_fill_ignores_seat_that_went_back_to_public(conn):
+    """Reviewer's repro: zip() paired the first freed seat (filled by the public) with a later enrollment."""
+    t0 = NOW
+    domain.drop(conn, GARCIA, reg_id(conn, SWIM2_TUE, SOFIA), t0)                    # seat_freed #1
+    for _ in range(2):
+        domain.staff_resolve(conn, SWIM2_TUE, head_id(conn, SWIM2_TUE), "unreachable", None, None, t0)
+    domain.register(conn, PATEL, SWIM2_TUE, [AVA], t0 + timedelta(hours=1))          # public takes it
+    domain.join_waitlist(conn, PATEL, SWIM2_TUE, [BEN], t0 + timedelta(hours=100))
+    domain.drop(conn, KIM, reg_id(conn, SWIM2_TUE, LEO), t0 + timedelta(hours=100))  # seat_freed #2
+    domain.staff_enroll(conn, SWIM2_TUE, head_id(conn, SWIM2_TUE), t0 + timedelta(hours=101))
+    assert domain.metrics(conn)["median_time_to_fill_hours"] == 1.0
+
+
+def test_join_rate_never_exceeds_100_percent(conn):
+    # Joining without a recorded page view (crafted POST / stale tab) used to give 300%.
+    domain.join_waitlist(conn, PATEL, SWIM2_TUE, [AVA], NOW)
+    rate = next(s for s in domain.metrics(conn)["sections"] if s["id"] == SWIM2_TUE)["join_rate"]
+    assert rate == 1.0
+
+
+# ---------------------------------------------------------------- choose who gets the last seat(s)
+
+def test_split_needed_when_more_eligible_than_seats(conn):
+    choice = domain.split_needed(conn, PATEL, SWIM2_THU, [AVA, BEN, MAYA], NOW)
+    assert choice.seats == 1
+    assert [p["id"] for p in choice.eligible] == [AVA, BEN]      # Maya is too young, so not a contender
+    assert codes(choice.blocked) == ["AGE_INELIGIBLE"]
+    assert domain.split_needed(conn, PATEL, SWIM2_THU, [AVA], NOW) is None
+
+
+def test_register_split_enrolls_choice_and_waitlists_rest_together(conn):
+    outcomes = domain.register_split(conn, PATEL, SWIM2_THU, [BEN], [AVA], NOW)
+    assert [o.ok for o in outcomes] == [True, True]
+    assert domain._is_enrolled(conn, SWIM2_THU, BEN)
+    assert domain._head(conn, SWIM2_THU)["participant_id"] == AVA
+
+
+def test_register_split_is_all_or_nothing_if_seat_taken_meanwhile(conn):
+    choice = domain.split_needed(conn, PATEL, SWIM2_THU, [AVA, BEN], NOW)
+    assert choice.seats == 1
+    # ...while the parent is looking at the popup, someone else takes the seat.
+    conn.execute("INSERT INTO participants (id, household_id, first_name, date_of_birth) "
+                 "SELECT 99, ?, 'Fast', date_of_birth FROM participants WHERE id = ?", (OKAFOR, ZARA))
+    domain.register(conn, OKAFOR, SWIM2_THU, [99], NOW)
+    with pytest.raises(DomainError) as e:
+        domain.register_split(conn, PATEL, SWIM2_THU, [BEN], [AVA], NOW)
+    assert e.value.code == "SEATS_CHANGED"
+    assert not domain._is_enrolled(conn, SWIM2_THU, BEN)
+    assert not domain._is_waiting(conn, SWIM2_THU, AVA)          # nothing half-written

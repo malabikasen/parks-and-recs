@@ -51,16 +51,29 @@ def is_initialized(conn: sqlite3.Connection) -> bool:
     return row is not None
 
 
+def _schema_statements() -> list[str]:
+    statements, buffer = [], ""
+    for line in SCHEMA_PATH.read_text().splitlines(keepends=True):
+        buffer += line
+        if sqlite3.complete_statement(buffer):
+            statements.append(buffer)
+            buffer = ""
+    return statements
+
+
 def ensure_db(path: str, seed_fn) -> None:
-    """Create + seed the database on first use (e.g. a Vercel cold start)."""
+    """Create + seed the database on first use (e.g. a Vercel cold start).
+    Schema and seed happen in one BEGIN IMMEDIATE, and the "already initialized?" check runs
+    inside it, so concurrent processes can't both create tables or see empty ones."""
     if path in _ready and os.path.exists(path):
         return
     with _init_lock:
         conn = connect(path)
         try:
-            if not is_initialized(conn):
-                conn.executescript(SCHEMA_PATH.read_text())
-                with write_tx(conn):
+            with write_tx(conn):
+                if not is_initialized(conn):
+                    for statement in _schema_statements():
+                        conn.execute(statement)
                     seed_fn(conn)
         finally:
             conn.close()

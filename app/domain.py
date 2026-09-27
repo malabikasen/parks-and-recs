@@ -182,48 +182,125 @@ def _for_each_participant(conn, household_id, participant_ids, action) -> list[O
 # ---------------------------------------------------------------- parent actions
 
 
+def _enroll_one(conn, section, participant, household_id: int, now: datetime) -> str:
+    _check_can_join(conn, section, participant, now)
+    enrolled, waiting = _counts(conn, section["id"])
+    if public_seats(section["capacity"], enrolled, waiting) == 0:
+        raise DomainError("SECTION_FULL", f"No seat left for {participant['first_name']}. You can join the waitlist.")
+    conn.execute(
+        "INSERT INTO registrations (section_id, participant_id, status, source, created_at) "
+        "VALUES (?, ?, 'enrolled', 'direct', ?)",
+        (section["id"], participant["id"], iso(now)),
+    )
+    _log(conn, "registered", now, section_id=section["id"], household_id=household_id, participant_id=participant["id"])
+    return f"{participant['first_name']} is enrolled."
+
+
+def _mark_full_seen(conn, section_id: int, household_id: int, now: datetime) -> None:
+    """Idempotent: one section_full_seen per household per section."""
+    conn.execute(
+        """INSERT INTO events (type, section_id, household_id, at)
+           SELECT 'section_full_seen', ?, ?, ? WHERE NOT EXISTS (
+             SELECT 1 FROM events WHERE type = 'section_full_seen' AND section_id = ? AND household_id = ?)""",
+        (section_id, household_id, iso(now), section_id, household_id),
+    )
+
+
+def _waitlist_one(conn, section, participant, household_id: int, request_id: str, now: datetime) -> str:
+    _check_can_join(conn, section, participant, now)
+    enrolled, waiting = _counts(conn, section["id"])
+    if public_seats(section["capacity"], enrolled, waiting) > 0:
+        raise DomainError("SEATS_AVAILABLE", "A seat is open. Register directly instead.")
+    cur = conn.execute(
+        "INSERT INTO waitlist_entries (section_id, participant_id, request_id, status, created_at) "
+        "VALUES (?, ?, ?, 'waiting', ?)",
+        (section["id"], participant["id"], request_id, iso(now)),
+    )
+    # Joining implies they saw it full, so the join rate can never exceed 100%.
+    _mark_full_seen(conn, section["id"], household_id, now)
+    _log(conn, "waitlist_joined", now, section_id=section["id"], household_id=household_id,
+         participant_id=participant["id"], request_id=request_id)
+    entry = conn.execute("SELECT * FROM waitlist_entries WHERE id = ?", (cur.lastrowid,)).fetchone()
+    return (f"{participant['first_name']} is #{_position(conn, entry)} on the waitlist. "
+            "We'll reach out if a seat opens up.")
+
+
 def register(conn, household_id: int, section_id: int, participant_ids: list[int], now: datetime) -> list[Outcome]:
     with write_tx(conn):
         section = _section(conn, section_id)
-
-        def enroll(participant):
-            _check_can_join(conn, section, participant, now)
-            enrolled, waiting = _counts(conn, section_id)
-            if public_seats(section["capacity"], enrolled, waiting) == 0:
-                raise DomainError("SECTION_FULL", f"No seat left for {participant['first_name']}. You can join the waitlist.")
-            conn.execute(
-                "INSERT INTO registrations (section_id, participant_id, status, source, created_at) "
-                "VALUES (?, ?, 'enrolled', 'direct', ?)",
-                (section_id, participant["id"], iso(now)),
-            )
-            _log(conn, "registered", now, section_id=section_id, household_id=household_id, participant_id=participant["id"])
-            return f"{participant['first_name']} is enrolled."
-
-        return _for_each_participant(conn, household_id, participant_ids, enroll)
+        return _for_each_participant(
+            conn, household_id, participant_ids, lambda p: _enroll_one(conn, section, p, household_id, now))
 
 
 def join_waitlist(conn, household_id: int, section_id: int, participant_ids: list[int], now: datetime) -> list[Outcome]:
     request_id = uuid.uuid4().hex[:8]  # shared by everyone joined in this one action
     with write_tx(conn):
         section = _section(conn, section_id)
+        return _for_each_participant(
+            conn, household_id, participant_ids, lambda p: _waitlist_one(conn, section, p, household_id, request_id, now))
 
-        def join(participant):
+
+@dataclass
+class SplitChoice:
+    """More eligible people were selected than there are seats: the parent picks who gets them."""
+    section_id: int
+    section_name: str
+    seats: int
+    eligible: list[dict]          # [{"id", "name"}] people who could take a seat
+    blocked: list[Outcome]        # selected people who can't register at all (age, duplicate, ...)
+
+
+def split_needed(conn, household_id: int, section_id: int, participant_ids: list[int], now: datetime) -> SplitChoice | None:
+    """Read-only preview for the Register button. Returns a choice when seats < eligible selections."""
+    section = _section(conn, section_id)
+    enrolled, waiting = _counts(conn, section_id)
+    seats = public_seats(section["capacity"], enrolled, waiting)
+    eligible, blocked = [], []
+    for pid in dict.fromkeys(participant_ids):
+        try:
+            participant = _participant(conn, pid)
+            if participant["household_id"] != household_id:
+                raise DomainError("NOT_IN_HOUSEHOLD", "That person isn't in your household.")
             _check_can_join(conn, section, participant, now)
-            enrolled, waiting = _counts(conn, section_id)
-            if public_seats(section["capacity"], enrolled, waiting) > 0:
-                raise DomainError("SEATS_AVAILABLE", "A seat is open. Register directly instead.")
-            cur = conn.execute(
-                "INSERT INTO waitlist_entries (section_id, participant_id, request_id, status, created_at) "
-                "VALUES (?, ?, ?, 'waiting', ?)",
-                (section_id, participant["id"], request_id, iso(now)),
-            )
-            _log(conn, "waitlist_joined", now, section_id=section_id, household_id=household_id,
-                 participant_id=participant["id"], request_id=request_id)
-            entry = conn.execute("SELECT * FROM waitlist_entries WHERE id = ?", (cur.lastrowid,)).fetchone()
-            return (f"{participant['first_name']} is #{_position(conn, entry)} on the waitlist. "
-                    "We'll reach out if a seat opens up.")
+            eligible.append({"id": pid, "name": participant["first_name"]})
+        except DomainError as e:
+            blocked.append(Outcome(pid, f"#{pid}", False, e.message, e.code))
+    if 0 < seats < len(eligible):
+        return SplitChoice(section_id, section["name"], seats, eligible, blocked)
+    return None
 
-        return _for_each_participant(conn, household_id, participant_ids, join)
+
+def register_split(conn, household_id: int, section_id: int, enroll_ids: list[int], waitlist_ids: list[int],
+                   now: datetime) -> list[Outcome]:
+    """Enroll the chosen people and waitlist the rest (sharing one request_id), all or nothing.
+    If seats changed while the parent was choosing, nothing is written."""
+    enroll_ids = list(dict.fromkeys(enroll_ids))
+    waitlist_ids = [pid for pid in dict.fromkeys(waitlist_ids) if pid not in enroll_ids]
+    if not enroll_ids:
+        raise DomainError("NO_PARTICIPANTS", "Pick who should get the seat.")
+    request_id = uuid.uuid4().hex[:8]
+    outcomes = []
+    with write_tx(conn):
+        section = _section(conn, section_id)
+        enrolled, waiting = _counts(conn, section_id)
+        seats = public_seats(section["capacity"], enrolled, waiting)
+        if len(enroll_ids) > seats or (waitlist_ids and len(enroll_ids) < seats):
+            raise DomainError("SEATS_CHANGED", f"There {'is' if seats == 1 else 'are'} now {seats} seat(s) left. "
+                                               "Please choose again.")
+        def own(pid):
+            participant = _participant(conn, pid)
+            if participant["household_id"] != household_id:
+                raise DomainError("NOT_IN_HOUSEHOLD", "That person isn't in your household.")
+            return participant
+
+        for pid in enroll_ids:
+            p = own(pid)
+            outcomes.append(Outcome(pid, p["first_name"], True, _enroll_one(conn, section, p, household_id, now)))
+        for pid in waitlist_ids:
+            p = own(pid)
+            outcomes.append(Outcome(pid, p["first_name"], True,
+                                    _waitlist_one(conn, section, p, household_id, request_id, now)))
+    return outcomes
 
 
 def drop(conn, household_id: int, registration_id: int, now: datetime) -> str:
@@ -303,7 +380,13 @@ def staff_resolve(conn, section_id: int, entry_id: int, outcome: str, reason: st
     if outcome == "unreachable":
         reason = None
     with write_tx(conn):
+        section = _section(conn, section_id)
         head = _require_head(conn, section_id, entry_id)
+        enrolled, _ = _counts(conn, section_id)
+        if enrolled >= section["capacity"]:
+            # Declined/unreachable are answers to an offer; with no free seat there was no offer,
+            # and counting it would skew outreach conversion.
+            raise DomainError("NO_SEAT_AVAILABLE", "No free seat to offer yet. Reach out once someone drops.")
         conn.execute(
             "UPDATE waitlist_entries SET status = ?, reason = ?, note = ?, resolved_at = ? WHERE id = ?",
             (outcome, reason, (note or "").strip() or None, iso(now), entry_id),
@@ -381,12 +464,7 @@ def record_full_seen(conn, household_id: int, cards: list[dict], now: datetime) 
         return
     with write_tx(conn):
         for sid in new:
-            conn.execute(
-                """INSERT INTO events (type, section_id, household_id, at)
-                   SELECT 'section_full_seen', ?, ?, ? WHERE NOT EXISTS (
-                     SELECT 1 FROM events WHERE type = 'section_full_seen' AND section_id = ? AND household_id = ?)""",
-                (sid, household_id, iso(now), sid, household_id),
-            )
+            _mark_full_seen(conn, sid, household_id, now)
 
 
 def my_registrations(conn, household_id: int) -> dict:
@@ -428,16 +506,20 @@ def staff_queues(conn) -> list[dict]:
 
 
 def _time_to_fill_hours(conn) -> list[float]:
-    """Pair each seat_freed with the next waitlist_enrolled in the same section (FIFO)."""
+    """For each waitlist enrollment, the hours since the most recent still-unpaired freed seat
+    in that section. Pairing by position (zip) was wrong: a freed seat that went back to the
+    public after the waitlist emptied would shift every later pair (found in adversarial review)."""
     durations = []
-    for (section_id,) in conn.execute("SELECT DISTINCT section_id FROM events WHERE type = 'seat_freed'").fetchall():
-        freed = [parse_ts(r[0]) for r in conn.execute(
-            "SELECT at FROM events WHERE type = 'seat_freed' AND section_id = ? ORDER BY id", (section_id,))]
-        filled = [parse_ts(r[0]) for r in conn.execute(
-            "SELECT at FROM events WHERE type = 'waitlist_enrolled' AND section_id = ? ORDER BY id", (section_id,))]
-        for f, e in zip(freed, filled):
-            if e >= f:
-                durations.append((e - f).total_seconds() / 3600)
+    for (section_id,) in conn.execute("SELECT DISTINCT section_id FROM events WHERE type = 'waitlist_enrolled'").fetchall():
+        rows = conn.execute(
+            "SELECT type, at FROM events WHERE section_id = ? AND type IN ('seat_freed', 'waitlist_enrolled') ORDER BY id",
+            (section_id,)).fetchall()
+        unpaired: list[datetime] = []
+        for type_, at in rows:
+            if type_ == "seat_freed":
+                unpaired.append(parse_ts(at))
+            elif unpaired:
+                durations.append((parse_ts(at) - unpaired.pop()).total_seconds() / 3600)
     return durations
 
 
