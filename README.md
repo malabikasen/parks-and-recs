@@ -2,7 +2,7 @@
 
 Parents browse programs and register household members for sections that have limited capacity. When a section fills up, they join a **waitlist**, and staff work through it in order.
 
-**Live demo:** _TBD (Vercel URL)_ · **Stack:** Python 3.12, FastAPI, Jinja2 + HTMX, SQLite (raw SQL), pytest
+**Live demo:** https://parks-and-recs.vercel.app · **Code:** https://github.com/malabikasen/parks-and-recs · **Stack:** Python 3.12, FastAPI, Jinja2 + HTMX, SQLite (raw SQL), pytest
 
 ## Try it in 2 minutes
 
